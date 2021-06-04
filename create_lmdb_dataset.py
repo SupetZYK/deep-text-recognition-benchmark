@@ -6,7 +6,7 @@ import lmdb
 import cv2
 
 import numpy as np
-
+from tqdm import tqdm
 
 def checkImageIsValid(imageBin):
     if imageBin is None:
@@ -83,5 +83,68 @@ def createDataset(inputPath, gtFile, outputPath, checkValid=True):
     print('Created dataset with %d samples' % nSamples)
 
 
+def createMJSynthDataset(dspath, outputPath, checkValid=True):
+    """
+    Create LMDB dataset for training and evaluation.
+    ARGS:
+        inputPath  : input folder path where starts imagePath
+        outputPath : LMDB output path
+        gtFile     : list of image path and label
+        checkValid : if true, check the validity of every image
+    """
+    os.makedirs(outputPath, exist_ok=True)
+    env = lmdb.open(outputPath, map_size=1099511627776)
+    cache = {}
+    cnt = 1
+    datalist = []
+    print("scanning root %s" % dspath) 
+    for root, dirs, files in os.walk(dspath):
+        for f in files:
+            if f.endswith('.jpg') or f.endswith('.png'):
+                datalist.append(os.path.join(root, f))
+
+    nSamples = len(datalist)
+    for i in tqdm(range(nSamples)):
+        imagePath = datalist[i]
+        label = datalist[i].split('/')[-1].split('_')[1]
+        # imagePath = os.path.join(inputPath, imagePath)
+
+        # # only use alphanumeric data
+        # if re.search('[^a-zA-Z0-9]', label):
+        #     continue
+
+        if not os.path.exists(imagePath):
+            print('%s does not exist' % imagePath)
+            continue
+        with open(imagePath, 'rb') as f:
+            imageBin = f.read()
+        if checkValid:
+            try:
+                if not checkImageIsValid(imageBin):
+                    print('%s is not a valid image' % imagePath)
+                    continue
+            except:
+                print('error occured', i)
+                with open(outputPath + '/error_image_log.txt', 'a') as log:
+                    log.write('%s-th image data occured error\n' % str(i))
+                continue
+
+        imageKey = 'image-%09d'.encode() % cnt
+        labelKey = 'label-%09d'.encode() % cnt
+        cache[imageKey] = imageBin
+        cache[labelKey] = label.encode()
+
+        if cnt % 1000 == 0:
+            writeCache(env, cache)
+            cache = {}
+            print('Written %d / %d' % (cnt, nSamples))
+        cnt += 1
+    nSamples = cnt-1
+    cache['num-samples'.encode()] = str(nSamples).encode()
+    writeCache(env, cache)
+    print('Created dataset with %d samples' % nSamples)
+
+
 if __name__ == '__main__':
-    fire.Fire(createDataset)
+    # fire.Fire(createDataset)
+    fire.Fire(createMJSynthDataset)

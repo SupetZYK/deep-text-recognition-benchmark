@@ -12,7 +12,7 @@ import numpy as np
 from torch.utils.data import Dataset, ConcatDataset, Subset
 from torch._utils import _accumulate
 import torchvision.transforms as transforms
-
+from tqdm import tqdm
 
 class Batch_Balanced_Dataset(object):
 
@@ -35,6 +35,7 @@ class Batch_Balanced_Dataset(object):
         self.dataloader_iter_list = []
         batch_size_list = []
         Total_batch_size = 0
+        Total_data_len = 0
         for selected_d, batch_ratio_d in zip(opt.select_data, opt.batch_ratio):
             _batch_size = max(round(opt.batch_size * float(batch_ratio_d)), 1)
             print(dashed_line)
@@ -59,12 +60,13 @@ class Batch_Balanced_Dataset(object):
             log.write(selected_d_log + '\n')
             batch_size_list.append(str(_batch_size))
             Total_batch_size += _batch_size
+            Total_data_len += len(_dataset)
 
             _data_loader = torch.utils.data.DataLoader(
                 _dataset, batch_size=_batch_size,
                 shuffle=True,
                 num_workers=int(opt.workers),
-                collate_fn=_AlignCollate, pin_memory=True)
+                collate_fn=_AlignCollate, pin_memory=False)
             self.data_loader_list.append(_data_loader)
             self.dataloader_iter_list.append(iter(_data_loader))
 
@@ -73,7 +75,7 @@ class Batch_Balanced_Dataset(object):
         Total_batch_size_log += f'Total_batch_size: {batch_size_sum} = {Total_batch_size}\n'
         Total_batch_size_log += f'{dashed_line}'
         opt.batch_size = Total_batch_size
-
+        self.Total_data_len = Total_data_len // Total_batch_size
         print(Total_batch_size_log)
         log.write(Total_batch_size_log + '\n')
         log.close()
@@ -99,6 +101,8 @@ class Batch_Balanced_Dataset(object):
 
         return balanced_batch_images, balanced_batch_texts
 
+    def __len__(self):
+        return self.Total_data_len
 
 def hierarchical_dataset(root, opt, select_data='/'):
     """ select_data='/' contains all sub-directory of root directory """
@@ -155,11 +159,10 @@ class LmdbDataset(Dataset):
                 see https://github.com/clovaai/deep-text-recognition-benchmark/blob/dff844874dbe9e0ec8c5a52a7bd08c7f20afe704/test.py#L137-L144
                 """
                 self.filtered_index_list = []
-                for index in range(self.nSamples):
+                for index in tqdm(range(self.nSamples), desc='check lmdb'):
                     index += 1  # lmdb starts with 1
                     label_key = 'label-%09d'.encode() % index
                     label = txn.get(label_key).decode('utf-8')
-
                     if len(label) > self.opt.batch_max_length:
                         # print(f'The length of the label is longer than max_length: length
                         # {len(label)}, {label} in dataset {self.root}')
@@ -185,26 +188,27 @@ class LmdbDataset(Dataset):
         with self.env.begin(write=False) as txn:
             label_key = 'label-%09d'.encode() % index
             label = txn.get(label_key).decode('utf-8')
+            img = Image.new('RGB', (self.opt.imgW, self.opt.imgH))
             img_key = 'image-%09d'.encode() % index
             imgbuf = txn.get(img_key)
+            del imgbuf
+            # buf = six.BytesIO()
+            # buf.write(imgbuf)
+            # buf.seek(0)
+            # try:
+            #     if self.opt.rgb:
+            #         img = Image.open(buf).convert('RGB')  # for color image
+            #     else:
+            #         img = Image.open(buf).convert('L')
 
-            buf = six.BytesIO()
-            buf.write(imgbuf)
-            buf.seek(0)
-            try:
-                if self.opt.rgb:
-                    img = Image.open(buf).convert('RGB')  # for color image
-                else:
-                    img = Image.open(buf).convert('L')
-
-            except IOError:
-                print(f'Corrupted image for {index}')
-                # make dummy image and dummy label for corrupted image.
-                if self.opt.rgb:
-                    img = Image.new('RGB', (self.opt.imgW, self.opt.imgH))
-                else:
-                    img = Image.new('L', (self.opt.imgW, self.opt.imgH))
-                label = '[dummy_label]'
+            # except IOError:
+            #     print(f'Corrupted image for {index}')
+            #     # make dummy image and dummy label for corrupted image.
+            #     if self.opt.rgb:
+            #         img = Image.new('RGB', (self.opt.imgW, self.opt.imgH))
+            #     else:
+            #         img = Image.new('L', (self.opt.imgW, self.opt.imgH))
+            #     label = '[dummy_label]'
 
             if not self.opt.sensitive:
                 label = label.lower()
@@ -213,7 +217,7 @@ class LmdbDataset(Dataset):
             out_of_char = f'[^{self.opt.character}]'
             label = re.sub(out_of_char, '', label)
 
-        return (img, label)
+        return img, label
 
 
 class RawDataset(Dataset):

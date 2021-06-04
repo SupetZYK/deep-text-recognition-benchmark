@@ -14,6 +14,7 @@ from nltk.metrics.distance import edit_distance
 from utils import CTCLabelConverter, AttnLabelConverter, Averager
 from dataset import hierarchical_dataset, AlignCollate
 from model import Model
+from tqdm import tqdm
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
@@ -86,7 +87,7 @@ def validation(model, criterion, evaluation_loader, converter, opt):
     infer_time = 0
     valid_loss_avg = Averager()
 
-    for i, (image_tensors, labels) in enumerate(evaluation_loader):
+    for i, (image_tensors, labels) in tqdm(enumerate(evaluation_loader),total=len(evaluation_loader)):
         batch_size = image_tensors.size(0)
         length_of_data = length_of_data + batch_size
         image = image_tensors.to(device)
